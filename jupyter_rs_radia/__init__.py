@@ -8,3 +8,14 @@ def _jupyter_labextension_paths():
             "dest": "jupyter_rs_radia",
         }
     ]
+
+
+def _jupyter_nbextension_paths():
+    return [
+        {
+            "section": "notebook",
+            "src": "nbextension",
+            "dest": "jupyter_rs_radia",
+            "require": "jupyter_rs_radia/extension",
+        }
+    ]

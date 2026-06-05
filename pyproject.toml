@@ -10,11 +10,19 @@ authors = [
 ]
 
 [tool.hatch.build]
-# include the built labextension in the wheel (paths adjusted to your repo)
+# include the built Jupyter frontend assets in the wheel
 artifacts = [
   "jupyter_rs_radia/labextension/**",
-  "jupyter_rs_radia/install.json",
+  "jupyter_rs_radia/nbextension/**",
+  "install.json",
+  "jupyter_rs_radia.json",
 ]
+
+[tool.hatch.build.targets.wheel.shared-data]
+"jupyter_rs_radia/labextension" = "share/jupyter/labextensions/jupyter_rs_radia"
+"install.json" = "share/jupyter/labextensions/jupyter_rs_radia/install.json"
+"jupyter_rs_radia/nbextension" = "share/jupyter/nbextensions/jupyter_rs_radia"
+"jupyter_rs_radia.json" = "etc/jupyter/nbconfig/notebook.d/jupyter_rs_radia.json"
 
 [tool.hatch.build.hooks.jupyter-builder]
 build-function = "hatch_jupyter_builder.npm_builder"
