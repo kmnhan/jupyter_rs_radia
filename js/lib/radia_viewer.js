@@ -52,22 +52,28 @@ export class RadiaViewerModel extends VBoxModel {
 
 function getVTKView(o) {
     if ((o.model || {}).name === 'VTKModel') {
-        return o;
+        return Promise.resolve(o);
     }
     // child views are Promises, must wait for them to resolve
-    for (let vx in (o.children_views || {}).views) {
-        let v = o.children_views.views[vx].then(getVTKView);
-        if (v) {
-            return v;
-        }
+    const views = (o.children_views || {}).views || [];
+    const childViews = Object.keys(views).map(function (vx) {
+        return views[vx].then(getVTKView);
+    });
+    if (! childViews.length) {
+        return Promise.resolve(null);
     }
-    return null;
+    return Promise.all(childViews).then(function (resolvedViews) {
+        return resolvedViews.find(function (v) {
+            return v;
+        }) || null;
+    });
 }
 
 export class RadiaViewerView extends VBoxView {
 
     fieldColorMapAxis = null;
     fieldColorMapScale = null;
+    pendingRefresh = false;
 
     //TODO(mvk): read schema from file
     schema = {
@@ -81,7 +87,7 @@ export class RadiaViewerView extends VBoxView {
     vtkViewerEl =  null;
 
     getVectors() {
-        return ((this.model.get('model_data').data || [])[0] || {}).vectors;
+        return (((this.model.get('model_data') || {}).data || [])[0] || {}).vectors;
     }
 
     handleCustomMessages(msg) {
@@ -126,10 +132,14 @@ export class RadiaViewerView extends VBoxView {
 
     refresh() {
         //rsUtils.rserr('radia refresh');
+        if (! this.fieldColorMapAxis) {
+            this.pendingRefresh = true;
+            return;
+        }
         this.select('.vector-field-color-map-content').css(
             'display', 'none');
         let vectors = this.getVectors();
-        if (! vectors) {
+        if (! vectors || ! vectors.vertices) {
             return;
         }
         const showScale = vectors.vertices.length > 3;
@@ -164,45 +174,7 @@ export class RadiaViewerView extends VBoxView {
         // this is effectively "super.render()"
         VBoxView.prototype.render.apply((this));
 
-        const view = this;
-
-        getVTKView(this).then(function (o) {
-            view.vtkViewer = o;
-            view.vtkViewerEl = $(view.vtkViewer.el).find('.vtk-widget');
-            view.vtkViewerEl.append($(template));
-            view.fieldColorMapAxis = d3.axisBottom(scaleLinear())
-                .ticks(view.schema.num_field_cmap_ticks);
-            view.select('.vector-field-color-map-axis .axis', 'd3')
-                .call(view.fieldColorMapAxis);
-
-            view.setTitle();
-            view.vtkViewer.processPickedObject = view.processSelectedObject(view);
-            view.vtkViewer.processPickedVector = view.processSelectedVector(view);
-
-            // this is a hidden element
-            $(view.el).find('.radia-file-input')
-                .on('change', function (e) {
-                    const f = e.target.files[0];
-                    const fr = new FileReader();
-                    fr.onload = function() {
-                        const d = fr.result.split(/,\s*/).map(function (x) {
-                            return parseFloat(x);
-                        });
-                        $(view.el).find('.widget-label.rs-file-input-label').text(f.name);
-                        view.model.set('file_data', d);
-                        view.touch();
-                    };
-                    fr.readAsText(f);
-                });
-
-            /*
-            $(view.el).find('.radia-file-output')
-                .on('click', function (e) {
-                    //'data:text/plain;charset=utf-8,' + encodeURIComponent(csv);
-                    e.stopPropagation();
-                });
-            */
-        });
+        this.setupVTKView();
 
         this.model.on('change:field_color_map_name', this.setFieldColorMap, this);
         this.model.on('change:title', this.setTitle, this);
@@ -223,7 +195,7 @@ export class RadiaViewerView extends VBoxView {
             return $(this.el).find(selector);
         }
         if (module === 'd3') {
-            return d3.select(selector);
+            return d3.select(this.el).select(selector);
         }
         return null;
     }
@@ -249,10 +221,17 @@ export class RadiaViewerView extends VBoxView {
     }
 
     setFieldScaling() {
+        if (! this.vtkViewer) {
+            return;
+        }
         this.vtkViewer.setVectorScaling(this.model.get('vector_scaling'));
     }
 
     setFieldIndicator(point, vect, units) {
+        if (! this.fieldColorMapScale || ! point || ! vect || ! vect.length) {
+            this.setSelectionText('--');
+            return;
+        }
         // mapping a Float32Array does not work
         let pt = [];
         point.forEach(function (c) {
@@ -291,6 +270,63 @@ export class RadiaViewerView extends VBoxView {
 
     setTitle() {
         this.select('.radia-viewer-title').text(this.model.get('title'));
+    }
+
+    setupVTKView(retries = 20) {
+        if (this.vtkViewer) {
+            return;
+        }
+        const view = this;
+        getVTKView(this).then(function (o) {
+            if (! o) {
+                if (retries > 0) {
+                    window.setTimeout(function () {
+                        view.setupVTKView(retries - 1);
+                    }, 100);
+                }
+                return;
+            }
+            view.vtkViewer = o;
+            view.vtkViewerEl = $(view.vtkViewer.el).find('.vtk-widget');
+            view.vtkViewerEl.append($(template));
+            view.fieldColorMapAxis = d3.axisBottom(scaleLinear())
+                .ticks(view.schema.num_field_cmap_ticks);
+            view.select('.vector-field-color-map-axis .axis', 'd3')
+                .call(view.fieldColorMapAxis);
+
+            view.setTitle();
+            view.setFieldScaling();
+            view.vtkViewer.processPickedObject = view.processSelectedObject(view);
+            view.vtkViewer.processPickedVector = view.processSelectedVector(view);
+
+            // this is a hidden element
+            $(view.el).find('.radia-file-input')
+                .on('change', function (e) {
+                    const f = e.target.files[0];
+                    const fr = new FileReader();
+                    fr.onload = function() {
+                        const d = fr.result.split(/,\s*/).map(function (x) {
+                            return parseFloat(x);
+                        });
+                        $(view.el).find('.widget-label.rs-file-input-label').text(f.name);
+                        view.model.set('file_data', d);
+                        view.touch();
+                    };
+                    fr.readAsText(f);
+                });
+
+            /*
+            $(view.el).find('.radia-file-output')
+                .on('click', function (e) {
+                    //'data:text/plain;charset=utf-8,' + encodeURIComponent(csv);
+                    e.stopPropagation();
+                });
+            */
+            if (view.pendingRefresh) {
+                view.pendingRefresh = false;
+                view.refresh();
+            }
+        });
     }
 
     upload() {
