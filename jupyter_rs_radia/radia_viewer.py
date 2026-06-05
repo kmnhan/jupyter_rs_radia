@@ -161,9 +161,12 @@ class RadiaViewer(ipywidgets.VBox):
             if f_type == radia_tk.FIELD_TYPE_MAG_M:
                 self.solve_results = self.mgr.get_magnetization(g_name)
             elif f_type in radia_tk.POINT_FIELD_TYPES:
-                self.solve_results = self.mgr.get_field(
-                    g_name, f_type, self.get_field_points()
-                )
+                field_points = self.get_field_points()
+                if field_points:
+                    self.solve_results = self.mgr.get_field(g_name, f_type, field_points)
+                else:
+                    self.solve_results = []
+                    self.rserr("No field points defined for {}".format(f_type))
             self.model_data = self.mgr.vector_field_to_data(
                 g_name, self.solve_results, radia_tk.FIELD_UNITS[f_type]
             )
@@ -208,6 +211,7 @@ class RadiaViewer(ipywidgets.VBox):
         pkdebug.pkdlog(msg)
 
     def __init__(self, mgr=None):
+        self.current_field_points = []
         self.model_data = {}
         self.mgr = radia_tk.RadiaGeomMgr() if mgr is None else mgr
         self.vtk_viewer = vtk_viewer.Viewer()

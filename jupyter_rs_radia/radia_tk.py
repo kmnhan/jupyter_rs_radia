@@ -105,6 +105,8 @@ class RadiaGeomMgr:
             v_data.vectors.vertices.extend(p)
             v_data.vectors.directions.extend(nv)
             v_data.vectors.magnitudes.append(n)
+        if not pv_arr:
+            v_min = 0.0
         v_data.vectors.range = [v_min, v_max]
         v_data.vectors.units = units
 
